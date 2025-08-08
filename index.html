@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>UV 2D - Simulador de Reflectores</title>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+
+  <style>
+    :root { --sidebar-width: 380px; --gap: 1.5rem; }
+    body { font-family: system-ui, sans-serif; margin: 0; display: flex; height: 100vh; background-color: #f0f2f5; }
+    .main-content { flex-grow: 1; padding: var(--gap); display: flex; flex-direction: column; }
+    .sidebar { width: var(--sidebar-width); background: #fff; padding: var(--gap); border-left: 1px solid #ddd; overflow-y: auto; }
+    h1 { margin: 0 0 1rem 0; color: #333; font-size: 1.5rem; }
+    details { border: 1px solid #ddd; border-radius: 4px; margin-bottom: 1rem; }
+    summary { font-weight: 600; padding: .6rem; cursor: pointer; background-color: #f9f9f9; }
+    .details-content { padding: 1rem; }
+    label { display: block; margin-top: .6rem; font-weight: 500; font-size: .9rem; }
+    input, select { width: 100%; padding: .3rem .4rem; box-sizing: border-box; }
+    button { width: 100%; padding: .7rem; font-size: 1rem; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 1rem; }
+    #run_viz { background-color: #007bff; }
+    #run_calc { background-color: #28a745; }
+    #reset_zoom { background-color: #6c757d; }
+    #ray-canvas { border: 1px solid #ccc; width: 100%; flex-grow: 1; min-height: 300px; }
+    #plotly-chart { border: 1px solid #ccc; width: 100%; min-height: 400px; margin-top: 1rem; }
+    #irradiance-summary { margin-top: 0.5rem; font-size: 0.9rem; text-align: center; font-family: monospace; }
+    #results-summary-text p { margin: 0.3rem 0; font-family: monospace; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+  <main class="main-content">
+    <h1>Visualizador de Reflectores UV</h1>
+    <canvas id="ray-canvas"></canvas>
+    <div id="irradiance-summary"></div>
+  </main>
+
+  <aside class="sidebar">
+    <h3>Controles</h3>
+    <details open><summary>Geometría de la Caja</summary><div class="details-content">
+        <label>Ancho de la base (m)</label><input type="number" id="ancho_base" value="0.40" step="0.01">
+        <label>Ancho del techo (m)</label><input type="number" id="ancho_techo" value="0.30" step="0.01">
+        <label>Altura de la caja (H, m)</label><input type="number" id="H" value="0.30" step="0.01">
+    </div></details>
+	<details open><summary>Reflector Interno (V)</summary><div class="details-content">
+        <label for="reflector_enabled">Activar Reflector</label>
+        <select id="reflector_enabled">
+          <option value="no" selected>No</option>
+          <option value="si">Sí</option>
+        </select>
+        <div id="reflector_params" style="display: none;">
+            <label>Ancho de unión del reflector (m)</label>
+            <input type="number" id="w_reflector_attach" value="0.30" step="0.01">
+            <label>Altura del vértice del reflector (m)</label>
+            <input type="number" id="h_reflector_vertex" value="0.28" step="0.01">
+        </div>
+    </div></details>
+	<details open><summary>Fuente de Luz</summary><div class="details-content">
+        <label>Tipo de Tubo</label>
+        <select id="tube_type">
+          <option value="TL20W">Philips TL 20W/01 RS</option>
+          <option value="TL40W">Philips TL 40W/01 RS</option>
+        </select>
+        <label>Altura del tubo (h, m)</label><input type="number" id="h" value="0.25" step="0.01">
+    </div></details>    <details><summary>Material Reflector</summary><div class="details-content">
+        <label>Material (Techo y Paredes)</label><select id="material">
+          <option value="manual">Manual (ρ fijo)</option>
+          <option value="Al_311nm">Aluminio (Rakić 1998)</option>
+          <option value="Ag_311nm">Plata (Johnson & Christy 1972)</option>
+        </select>
+        <label>Reflectividad ρ (si manual)</label><input type="number" id="rho_manual" value="0.80" min="0" max="1" step="0.01">
+    </div></details>
+    <details><summary>Parámetros de Simulación</summary><div class="details-content">
+        <label>Nº de rayos (visualización)</label><input type="number" id="nrays_viz" value="50" min="10" step="10">
+        <label>Nº de rayos (cálculo)</label><input type="number" id="nrays_calc" value="100000" min="1000" step="1000">
+        <label>Nº de rebotes máx.</label><input type="number" id="max_bounces" value="5" min="0" max="10" step="1">
+    </div></details>
+    <details id="results-details" open><summary>Resultados del Cálculo</summary><div class="details-content" id="results-summary-text">
+        <p>Presiona 'Calcular Irradiancia'...</p>
+    </div></details>
+    <p style="font-size: 0.8rem; text-align: center; color: #555;">Arrastra en la visualización para hacer zoom.</p>
+    <button id="reset_zoom">Resetear Zoom</button>
+    <button id="run_viz">Visualizar Rayos</button>
+    <button id="run_calc">Calcular Irradiancia</button>
+  </aside>
+
+  <py-config>
+    [[fetch]]
+    files = ["materials.py", "raytracer2d.py", "quantitative_tracer.py",
+             "analysis.py", "drawing.py", "dom_bindings.py", "params.py", "ui.py"]
+  </py-config>
+
+  <py-script src="ui.py"></py-script>
+
+</body>
+</html>
