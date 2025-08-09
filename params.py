@@ -1,4 +1,4 @@
-# params.py (Versión 1.5 - PowerNorm stable)
+# params.py (Versión 1.7 - Tubo)
 # Lee parámetros desde el DOM y arma el diccionario 'params' que usan la UI y el trazador.
 # Salida coherente con el modelo 2D por metro de profundidad.
 
@@ -72,11 +72,21 @@ def read_common_params():
     params["PHYSICS_WEIGHTING"] = True
     params["CALIBRATE_TO_E0"]   = False
 
+    # Interacción del tubo con rayos posteriores (opcional)
+    params["TUBE_INTERACTS"] = True        # Activa/desactiva interacción del tubo
+    params["TUBE_OCCLUDES"]  = True        # Si True, el tubo bloquea (sin transmisión)
+    params["TUBE_FRESNEL_R"] = 0.04        # Reflexión especular constante (0–1)
+    
     # Kernel recomendado (rebotes radiance-conserving; la directa usa 1/(4π r^2) en el trazador)
     params["KERNEL_MODE"] = "radiance_conserving"
     # (Opcional) Exponente si usás el modo paramétrico de rebotes:
     # params["BOUNCE_KERNEL_EXPONENT"] = 1.2
-
+    
+    # --- Estilo de visualización del tubo ---
+    params["TUBE_DRAW_COLOR"]  = "#5bc0de"   # color del contorno (podés cambiarlo)
+    params["TUBE_DRAW_FILL_A"] = 0.15        # opacidad del relleno (0..1)
+    params["TUBE_DRAW_LABEL"]  = True        # mostrar "Tubo UV-B" dentro del círculo
+        
     return params
 
 # Analítico de línea finita (2D por metro): E(0) = q / [4 π h sqrt(h^2 + (L/2)^2)], con q = Φ/L
