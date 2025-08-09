@@ -1,4 +1,4 @@
-# quantitative_tracer.py (Versión 2.8 – PowerNormRadiance)
+# quantitative_tracer.py (Versión 2.9 – PowerNormRadiance)
 # Salida: base_hits[*]["weight"] en W/m² (modelo 2D: por metro de profundidad).
 # Cambios clave respecto a versiones previas:
 #  - Emisión isotrópica 2π desde el eje del tubo (consistente con fuente lineal 3D).
@@ -36,6 +36,11 @@ def trace_for_analysis(
     PHYSICS_WEIGHTING     = bool(kwargs.get("PHYSICS_WEIGHTING", True))
     KERNEL_MODE           = str(kwargs.get("KERNEL_MODE", "radiance_conserving"))
     BOUNCE_KERNEL_EXPONENT= float(kwargs.get("BOUNCE_KERNEL_EXPONENT", 1.0))
+
+    # ----- Interacción del tubo (opcional) -----
+    TUBE_INTERACTS = bool(kwargs.get("TUBE_INTERACTS", True))
+    TUBE_OCCLUDES  = bool(kwargs.get("TUBE_OCCLUDES",  True))
+    TUBE_FRESNEL_R = float(kwargs.get("TUBE_FRESNEL_R", 0.04))
 
     # ----- Normalización por potencia (OBLIGATORIA) -----
     # POWER_PER_RAY_P0: potencia lineal por rayo [W/m] = (Φ/L)/N
@@ -135,6 +140,24 @@ def trace_for_analysis(
                     if t > 1e-6 and 0.0 <= s <= 1.0:
                         candidates.append(("refl_r", t, None, None))
 
+            # --- Tubo (círculo) como obstáculo con Fresnel constante ---
+            if TUBE_INTERACTS and TUBE_OCCLUDES:
+                # Sólo si el punto actual está fuera del tubo
+                if (x1 - x0)*(x1 - x0) + (z1 - z0)*(z1 - z0) > (radio_m + 1e-6)**2:
+                    ox, oz = (x1 - x0), (z1 - z0)
+                    a = dx*dx + dz*dz
+                    bq = 2.0*(ox*dx + oz*dz)
+                    c = ox*ox + oz*oz - radio_m*radio_m
+                    disc = bq*bq - 4.0*a*c
+                    if disc > 0.0:
+                        sdisc = math.sqrt(disc)
+                        t1 = (-bq - sdisc) / (2.0*a)
+                        t2 = (-bq + sdisc) / (2.0*a)
+                        t_hit = min(t for t in (t1, t2) if t > 1e-6) if (t1 > 1e-6 or t2 > 1e-6) else None
+                        if t_hit is not None:
+                            xt, zt = (x1 + dx*t_hit, z1 + dz*t_hit)
+                            candidates.append(("tube", t_hit, xt, zt))
+
             if not candidates:
                 break  # no intersecta nada más
 
@@ -171,6 +194,27 @@ def trace_for_analysis(
 
                 base_hits.append({"x": x2, "bounce": b, "weight": contrib})
                 break  # termina en la base
+
+            # ----- Impacto en tubo: refleja R y absorbe 1-R; sin transmisión -----
+            if surf == "tube" and TUBE_INTERACTS and TUBE_OCCLUDES:
+                # Normal del círculo
+                nx, nz = (x2 - x0), (z2 - z0)
+                nm = math.hypot(nx, nz)
+                if nm <= 0.0:
+                    break
+                nx, nz = nx/nm, nz/nm
+
+                # Multiplicar energía por R constante; absorber 1-R
+                weight *= TUBE_FRESNEL_R
+                power  *= TUBE_FRESNEL_R
+                if weight < 0.01:
+                    break
+
+                # Reflejar direccionalmente y avanzar un epsilon
+                dx, dz = reflect((dx, dz), (nx, nz))
+                eps = 1e-5
+                x1, z1 = (x2 + eps*dx, z2 + eps*dz)
+                continue  # no aplicar rho del recinto
 
             # ----- Atenuación por reflectividad y corte -----
             weight *= rho
