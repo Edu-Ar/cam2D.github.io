@@ -1,7 +1,8 @@
-# drawing.py (Versión 1.17)
+# drawing.py (Versión 1.18)
 # - Centra la escena en el canvas y sincroniza tamaño CSS ↔ bitmap.
 # - _draw_rays acepta segmentos, pares y polilíneas; convierte a float y valida finitud.
 # - Eje Y  real a la izquierda.
+# - NUEVO: Estilo del tubo configurable (color, relleno con alpha y etiqueta "Tubo UV-B").
 
 import math
 from js import document, window
@@ -74,37 +75,84 @@ def _clear_canvas(ctx, w, h):
     ctx.clearRect(0, 0, w, h)
 
 # --------------------------
-# Fondo: caja + tubo
+# Auxiliar: dibujar tubo con estilo
+# --------------------------
+def _draw_tube_styled(ctx, geom, view, w, h):
+    """
+    Dibuja el tubo como círculo con color/alpha configurables y etiqueta opcional.
+    Lee: TUBE_DRAW_COLOR, TUBE_DRAW_FILL_A, TUBE_DRAW_LABEL de geom (params).
+    """
+    x0, z0, r = 0.0, geom["h_tube"], geom["radio_m"]
+    color = geom.get("TUBE_DRAW_COLOR", "#5bc0de")
+    fill_a = float(geom.get("TUBE_DRAW_FILL_A", 0.15) or 0.0)
+    show_label = bool(geom.get("TUBE_DRAW_LABEL", True))
+
+    cx, cy = _to_px(x0, z0, view, w, h)
+    scale, _, _ = get_scene_transform(view, w, h)
+    rp = max(1.0, r * scale)
+
+    # Contorno
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(cx, cy, rp, 0, 2 * math.pi)
+    ctx.lineWidth = 2.0
+    ctx.strokeStyle = color
+    ctx.stroke()
+
+    # Relleno con alpha (si el contexto soporta globalAlpha)
+    if fill_a > 0.0:
+        try:
+            old_alpha = ctx.globalAlpha
+            ctx.globalAlpha = max(0.0, min(1.0, fill_a))
+            ctx.fillStyle = color
+            ctx.fill()
+            ctx.globalAlpha = old_alpha
+        except Exception:
+            # Fallback: sin alpha controlable, se rellena con el mismo color
+            ctx.fillStyle = color
+            ctx.fill()
+
+    # Etiqueta dentro del tubo
+    if show_label:
+        ctx.font = "12px sans-serif"
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        # Elegir negro o blanco según el color del contorno no es trivial sin parsear RGB;
+        # dejamos negro por defecto (contrasta bien con el celeste propuesto).
+        ctx.fillStyle = "#000"
+        ctx.fillText("Tubo UV-B", cx, cy)
+    ctx.restore()
+
+# --------------------------
+# Fondo: caja + tubo (+ reflector)
 # --------------------------
 def _draw_background(ctx, geom, view, w, h):
     Wb = geom["W_base"]; Wc = geom["W_ceil"]; H = geom["H"]
-    h_tube = geom["h_tube"]; r = geom["radio_m"]
     _clear_canvas(ctx, w, h)
+
+    # Paredes/base/techo
     ctx.lineWidth = 1.0
     ctx.strokeStyle = "#888"
     _draw_segment(ctx, -Wb/2, 0,  Wb/2, 0, view, w, h)
     _draw_segment(ctx, -Wc/2, H,  Wc/2, H, view, w, h)
     _draw_segment(ctx, -Wb/2, 0, -Wc/2, H, view, w, h)
     _draw_segment(ctx,  Wb/2, 0,  Wc/2, H, view, w, h)
-    ctx.strokeStyle = "#444"
-    _draw_circle(ctx, 0.0, h_tube, r, view, w, h)
 
-    # --- INICIO: NUEVO CÓDIGO PARA DIBUJAR REFLECTOR ---
+    # Tubo con estilo (antes o después de rayos; acá lo dejamos en el fondo)
+    _draw_tube_styled(ctx, geom, view, w, h)
+
+    # Reflector en V
     if geom.get("reflector_enabled"):
         h_refl_v = geom["h_reflector_vertex"]
         w_refl_a = geom["w_reflector_attach"]
-        H = geom["H"]
-        
         p_vertex = (0.0, h_refl_v)
         p_left = (-w_refl_a / 2.0, H)
         p_right = (w_refl_a / 2.0, H)
-
         ctx.lineWidth = 1.0
-        ctx.strokeStyle = "#888" # Mismo estilo que las paredes
+        ctx.strokeStyle = "#888"  # mismo estilo que paredes
         _draw_segment(ctx, p_left[0], p_left[1], p_vertex[0], p_vertex[1], view, w, h)
         _draw_segment(ctx, p_vertex[0], p_vertex[1], p_right[0], p_right[1], view, w, h)
-    # --- FIN: NUEVO CÓDIGO ---    
-    
+
 # --------------------------
 # Capa de rayos (robusta)
 # --------------------------
@@ -112,19 +160,16 @@ def _draw_rays(ctx, rays, geom, view, w, h):
     if not rays:
         return
     colors = {
-        0: "#2ca02c",  # Verde oscuro para rayos directos (0 rebotes)
-        1: "#1f77b4",  # Azul para 1 rebote
-        "multi": "#888888" # Gris para 2 o más rebotes
+        0: "#2ca02c",   # 0 rebotes (directos)
+        1: "#1f77b4",   # 1 rebote
+        "multi": "#888" # 2+ rebotes
     }
     for ray_path in rays:
         if not ray_path:
             continue
         last_segment = ray_path[-1]
         hit_base = abs(last_segment[3]) < 1e-6
-        if hit_base:
-            ctx.lineWidth = 2.0
-        else:
-            ctx.lineWidth = 1.0
+        ctx.lineWidth = 2.0 if hit_base else 1.0
         for item in ray_path:
             if isinstance(item, (list, tuple)) and len(item) == 5:
                 try:
@@ -220,19 +265,16 @@ def _draw_real_y_axis(ctx, y_axis_data, geom, view, w, h):
     _draw_segment(ctx, x_axis, zb, x_axis, zt, view, w, h)
     
     # --- INICIO DE LA LÓGICA MEJORADA ---
-    # Calcular dinámicamente el número de ticks en función del espacio disponible
     _, py_bottom = _to_px(x_axis, zb, view, w, h)
     _, py_top = _to_px(x_axis, zt, view, w, h)
     axis_height_px = abs(py_top - py_bottom)
     
-    # Intentar tener un tick cada 40-50 píxeles, pero no menos de 2.
     desired_tick_spacing_px = 50 
     num_ticks_real = max(2, int(round(axis_height_px / desired_tick_spacing_px)))
     
     range_real = y_max_display_real - y_min_display_real
     if range_real <= 0: range_real = 1.0
     
-    # Algoritmo para encontrar un "paso" legible (múltiplo de 1, 2, 5)
     rough_step = range_real / num_ticks_real
     exponent = math.floor(math.log10(rough_step))
     fractional = rough_step / (10**exponent)
@@ -258,7 +300,7 @@ def _draw_real_y_axis(ctx, y_axis_data, geom, view, w, h):
             real_tick_values.append(current_real_tick)
         current_real_tick += major_step_real
 
-    if not real_tick_values: # Asegurar al menos un tick si el bucle falla
+    if not real_tick_values:
         if y_max_display_real > y_min_display_real:
              real_tick_values.append(y_min_display_real)
              real_tick_values.append(y_max_display_real)
@@ -271,7 +313,6 @@ def _draw_real_y_axis(ctx, y_axis_data, geom, view, w, h):
         label_font_size = "14px"
         label_offset_m = 0.025 * geom["W_base"]
         
-        # Formato de la etiqueta
         if major_step_real >= 1:
              label_text = f"{yv_real:.1f}"
         elif major_step_real >= 0.1:
@@ -290,9 +331,8 @@ def _draw_real_y_axis(ctx, y_axis_data, geom, view, w, h):
         ctx.textBaseline = "middle"
         ctx.fillText(label_text, px, py)
         
-    # Etiqueta del eje
     label_text = unit_label
-    px_label, py_label = _to_px(x_axis - 0.08 * geom["W_base"], zb + (zt - zb) / 2, view, w, h) # Ajuste de posición
+    px_label, py_label = _to_px(x_axis - 0.08 * geom["W_base"], zb + (zt - zb) / 2, view, w, h)
     ctx.save()
     ctx.translate(px_label, py_label)
     ctx.rotate(-math.pi / 2)
@@ -385,6 +425,7 @@ def _draw_curves(ctx, curves, geom, view, w, h):
                     ctx.lineTo(px, py)
             if started:
                 ctx.stroke()
+
 # --------------------------
 # Marcador de inflexión (curva total)
 # --------------------------
@@ -494,5 +535,3 @@ def draw_main_scene(rays, curves, view, geom):
         _draw_curve_legend(ctx, curves, geom, w_logical, h_logical)
         if "inflection_x" in geom and geom["inflection_x"] is not None:
             _mark_inflection(ctx, curves, geom["inflection_x"], geom, view, w_logical, h_logical)
-            
-            
